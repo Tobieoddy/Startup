@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Provisioning of an EC2 Instance within a Custom Network via Cloudformation
+
+Resources:
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.7.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: StartupVPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      AvailabilityZone: eu-west-2b
+      CidrBlock: 10.7.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags: 
+        - Key: Name
+          Value: StartupPublicSubnet
+      VpcId: !Ref VPC
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      AvailabilityZone: eu-west-2b
+      CidrBlock: 10.7.2.0/24
+      MapPublicIpOnLaunch: false
+      Tags: 
+        - Key: Name
+          Value: StartupPrivateSubnet
+      VpcId: !Ref VPC
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: StartupPublicRouteTable
+      VpcId: !Ref VPC
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: StartupPrivateRouteTable
+      VpcId: !Ref VPC
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow http to client host
+      GroupName: Web SG1
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags: 
+        - Key: Name
+          Value: StartupSG
+      VpcId: !Ref VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: StartupIGW
+
+  InternetGatewatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties: 
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+
+  WebInstance:
+    Type: AWS::EC2::Instance
+    Properties: 
+      BlockDeviceMappings: 
+        - DeviceName: /dev/xvda
+          Ebs: 
+            VolumeType: gp3
+            Iops: 3000
+            DeleteOnTermination: true
+            VolumeSize: 8
+      ImageId: "ami-0505148b3591e4c07"
+      InstanceType: t2.micro
+      KeyName: "cba_keypair"
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      SubnetId: !Ref PublicSubnet
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo apt-get update -y 
+          curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | sudo tee \
+          /usr/share/keyrings/jenkins-keyring.asc > /dev/null
+          echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] \
+          https://pkg.jenkins.io/debian-stable binary/ | sudo tee \
+          /etc/apt/sources.list.d/jenkins.list > /dev/null
+          sudo apt-get update -y 
+          sudo apt install openjdk-17-jre -y 
+          sudo apt-get install jenkins -y
+          apt-get update -y
+          sudo systemctl enable jenkins
+          sudo systemctl start jenkins
+          sudo systemctl status jenkins
+          cat /var/lib/jenkins/secrets/initialAdminPassword
+          
+      Tags:
+        - Key: Name
+          Value: StartupInstance
